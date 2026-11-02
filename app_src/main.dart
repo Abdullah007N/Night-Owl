@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
+// ======= النصوص الجاهزة (غيّر فيها زي ما تحب) =======
 const List<String> kMessages = [
   'OBEY',
   'CONSUME',
@@ -79,7 +80,7 @@ class _ObeyScreenState extends State<ObeyScreen> {
   Future<void> _onFrame(CameraImage image) async {
     if (!_glassesOn || _busy) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastRun < 250) return;
+    if (now - _lastRun < 250) return; // 4 مرات في الثانية تقريباً
     _lastRun = now;
     _busy = true;
 
@@ -111,7 +112,7 @@ class _ObeyScreenState extends State<ObeyScreen> {
       final hits = <_Hit>[];
       for (final block in result.blocks) {
         final r = block.boundingBox;
-        if (r.width < 40 || r.height < 18) continue;
+        if (r.width < 40 || r.height < 18) continue; // تجاهل الصغير جداً
         final msg = kMessages[block.text.hashCode.abs() % kMessages.length];
         hits.add(_Hit(r, msg));
       }
@@ -119,7 +120,7 @@ class _ObeyScreenState extends State<ObeyScreen> {
       if (!mounted) return;
       if (hits.isEmpty) {
         _emptyFrames++;
-        if (_emptyFrames < 3) return;
+        if (_emptyFrames < 3) return; // يمنع الوميض
       } else {
         _emptyFrames = 0;
       }
@@ -128,6 +129,7 @@ class _ObeyScreenState extends State<ObeyScreen> {
         _uprightSize = upright;
       });
     } catch (_) {
+      // تجاهل أخطاء الفريم الواحد
     } finally {
       _busy = false;
     }
@@ -137,4 +139,133 @@ class _ObeyScreenState extends State<ObeyScreen> {
   void dispose() {
     _controller?.dispose();
     _recognizer.close();
-    super.di
+    super.dispose();
+  }
+
+  // فلتر أبيض وأسود بكونتراست عالي
+  static ColorFilter _bwFilter() {
+    const c = 1.7;
+    const t = (-0.5 * c + 0.5) * 255;
+    return const ColorFilter.matrix(<double>[
+      0.2126 * c, 0.7152 * c, 0.0722 * c, 0, t, //
+      0.2126 * c, 0.7152 * c, 0.0722 * c, 0, t,
+      0.2126 * c, 0.7152 * c, 0.0722 * c, 0, t,
+      0, 0, 0, 1, 0,
+    ]);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    Widget preview = CameraPreview(controller);
+    if (_glassesOn) {
+      preview = ColorFiltered(colorFilter: _bwFilter(), child: preview);
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: _uprightSize.width,
+              height: _uprightSize.height,
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  preview,
+                  if (_glassesOn)
+                    CustomPaint(painter: _OverlayPainter(_hits)),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 40,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.black87,
+                  foregroundColor: Colors.white,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    side: const BorderSide(color: Colors.white54),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
+                onPressed: () => setState(() {
+                  _glassesOn = !_glassesOn;
+                  if (!_glassesOn) _hits = [];
+                }),
+                icon: Icon(_glassesOn ? Icons.visibility : Icons.visibility_off),
+                label: Text(_glassesOn ? 'TAKE OFF GLASSES' : 'PUT ON GLASSES'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Hit {
+  final Rect rect;
+  final String message;
+  _Hit(this.rect, this.message);
+}
+
+class _OverlayPainter extends CustomPainter {
+  final List<_Hit> hits;
+  _OverlayPainter(this.hits);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bg = Paint()..color = Colors.black;
+    final border = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+
+    for (final h in hits) {
+      final r = h.rect.inflate(6);
+      canvas.drawRect(r, bg);
+      canvas.drawRect(r, border);
+
+      final tp = TextPainter(
+        text: TextSpan(
+          text: h.message,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: r.height * 0.7,
+            letterSpacing: 2,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+
+      // لو النص أعرض من المربع صغّره
+      final scale = tp.width > r.width * 0.92 ? (r.width * 0.92) / tp.width : 1.0;
+      canvas.save();
+      canvas.translate(r.center.dx, r.center.dy);
+      canvas.scale(scale);
+      tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));
+      canvas.restore();
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OverlayPainter old) => old.hits != hits;
+}
