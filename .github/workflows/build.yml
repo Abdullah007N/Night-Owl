@@ -21,11 +21,20 @@ jobs:
           cp app_src/main.dart obey_app/lib/main.dart
           cp app_src/pubspec.yaml obey_app/pubspec.yaml
           sed -i 's#<application#<uses-permission android:name="android.permission.CAMERA"/>\n    <application#' obey_app/android/app/src/main/AndroidManifest.xml
+          # disable R8 minify (fixes ML Kit missing classes error)
+          F=obey_app/android/app/build.gradle.kts
+          if [ -f "$F" ]; then
+            sed -i 's#signingConfig = signingConfigs.getByName("debug")#signingConfig = signingConfigs.getByName("debug")\n            isMinifyEnabled = false\n            isShrinkResources = false#' "$F"
+          else
+            F=obey_app/android/app/build.gradle
+            sed -i 's#signingConfig signingConfigs.debug#signingConfig signingConfigs.debug\n            minifyEnabled false\n            shrinkResources false#' "$F"
+          fi
+          grep -n -i "minify" "$F"
       - name: Build release APK
         working-directory: obey_app
         run: |
           flutter pub get
-          flutter build apk --release --no-shrink
+          flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
           name: obey-apk
